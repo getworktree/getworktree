@@ -8,6 +8,7 @@ to a ``_run_*_step`` function and handling sandbox cleanup.
 from __future__ import annotations
 
 import threading
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -93,6 +94,7 @@ def run_workflow_iteration(
     detect_repeat_failures: bool | None = None,
     include_wip: bool = False,
     prompt_dump_dir: Path | None = None,
+    use_git_worktree: bool | None = None,
 ) -> WorkflowRunResult:
     """Run one full workflow session attempt cycle.
 
@@ -132,6 +134,7 @@ def run_workflow_iteration(
             the sandbox after create (``--wip``).
         prompt_dump_dir: Optional directory to write provider-specific
             agent-input dumps (one file per attempt) before each agent call.
+        use_git_worktree: Optional override to run in-place without creating a worktree.
 
     Returns:
         Structured :class:`WorkflowRunResult` (never raises for classified paths).
@@ -206,34 +209,51 @@ def run_workflow_iteration(
     payload_builder = build_payload_fn or build_failure_payload
     changed_files_fn = list_changed_files or default_list_changed_files
 
+    resolved_use_worktree = (
+        use_git_worktree
+        if use_git_worktree is not None
+        else workflow.sandbox.use_git_worktree
+    )
+
     manager: GitSandboxManager | None = None
     session: SandboxSession | None = None
 
-    if create_sandbox_fn is not None:
-        create_result = create_sandbox_fn()
+    if resolved_use_worktree:
+        if create_sandbox_fn is not None:
+            create_result = create_sandbox_fn()
+        else:
+            manager = GitSandboxManager(cwd=root)
+            create_result = manager.create_sandbox_result(
+                session_id=session_id,
+                include_wip=include_wip,
+            )
+
+        if not create_result.ok or create_result.session is None:
+            errors = list(create_result.errors) or [
+                f"Sandbox create failed: {create_result.status}"
+            ]
+            return WorkflowRunResult(
+                status=WorkflowFinalStatus.FAILED,
+                session_id=session_id or "",
+                workflow_name=workflow_name,
+                stop_reason=StopReason.SANDBOX_CREATE_FAILED,
+                max_attempts=max_attempts,
+                errors=errors,
+            )
+
+        session = create_result.session
+        sandbox_path = session.sandbox_path
+        sid = session.session_id
     else:
-        manager = GitSandboxManager(cwd=root)
-        create_result = manager.create_sandbox_result(
-            session_id=session_id,
-            include_wip=include_wip,
+        sid = session_id or f"wf_{uuid.uuid4().hex[:8]}"
+        sandbox_path = root
+        session = SandboxSession(
+            session_id=sid,
+            target_branch="-",
+            sandbox_path=root,
+            base_commit="HEAD",
+            created_at=_now_iso(),
         )
-
-    if not create_result.ok or create_result.session is None:
-        errors = list(create_result.errors) or [
-            f"Sandbox create failed: {create_result.status}"
-        ]
-        return WorkflowRunResult(
-            status=WorkflowFinalStatus.FAILED,
-            session_id=session_id or "",
-            workflow_name=workflow_name,
-            stop_reason=StopReason.SANDBOX_CREATE_FAILED,
-            max_attempts=max_attempts,
-            errors=errors,
-        )
-
-    session = create_result.session
-    sandbox_path = session.sandbox_path
-    sid = session.session_id
     attempts: list[AttemptRecord] = []
     final_status = WorkflowFinalStatus.FAILED
     stop_reason = StopReason.MAX_ATTEMPTS_EXHAUSTED
@@ -479,10 +499,14 @@ def run_workflow_iteration(
         session.command_passed = command_passed
         capture_and_persist_diff(session=session, cwd=root, warnings=warnings)
         _record_db_status()
-        will_clean = should_cleanup_sandbox(
-            auto_clean=resolved_auto,
-            keep_on_failure=resolved_keep,
-            command_passed=command_passed,
+        will_clean = (
+            should_cleanup_sandbox(
+                auto_clean=resolved_auto,
+                keep_on_failure=resolved_keep,
+                command_passed=command_passed,
+            )
+            if resolved_use_worktree
+            else False
         )
         if will_clean:
             if cleanup_sandbox_fn is not None:
@@ -492,7 +516,7 @@ def run_workflow_iteration(
             retained = False
             result_sandbox: Path | None = None
         else:
-            retained = True
+            retained = True if resolved_use_worktree else False
             result_sandbox = sandbox_path
 
     return WorkflowRunResult(

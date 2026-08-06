@@ -260,6 +260,11 @@ def workflow_run(
             "(debugging aid)."
         ),
     ),
+    no_worktree: bool = typer.Option(
+        False,
+        "--no-worktree",
+        help="Run execution in-place in the working tree without creating a Git worktree.",
+    ),
 ):
     """Run a workflow in an isolated git worktree sandbox."""
     workflow_run_command(
@@ -269,6 +274,7 @@ def workflow_run(
         approve_each=approve_each,
         wip=wip,
         dump_prompt=dump_prompt,
+        no_worktree=no_worktree,
     )
 
 
@@ -499,9 +505,14 @@ def task_show(
 def task_run(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Task blueprint name to run."),
+    no_worktree: bool = typer.Option(
+        False,
+        "--no-worktree",
+        help="Run execution in-place in the working tree without creating a Git worktree.",
+    ),
 ):
     """Run a task blueprint."""
-    outcome = task_run_command(name=name)
+    outcome = task_run_command(name=name, no_worktree=no_worktree)
     if not outcome.ok:
         raise typer.Exit(code=1)
 

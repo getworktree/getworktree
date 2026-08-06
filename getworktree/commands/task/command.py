@@ -67,8 +67,7 @@ def task_list_command(
     items: list[TaskBlueprintItem] = []
     for record in task_records:
         file_path = catalog_dir / record.path
-        description = ""
-        summary = ""
+        use_git_worktree = True
         if file_path.exists():
             try:
                 content = file_path.read_text(encoding="utf-8")
@@ -76,6 +75,8 @@ def task_list_command(
                 if isinstance(yaml_data, dict):
                     description = str(yaml_data.get("description", ""))
                     summary = str(yaml_data.get("summary", ""))
+                    if "use_git_worktree" in yaml_data:
+                        use_git_worktree = bool(yaml_data.get("use_git_worktree", True))
             except Exception:
                 pass
 
@@ -86,6 +87,7 @@ def task_list_command(
                 summary=summary,
                 sha=record.sha,
                 path=str(record.path),
+                use_git_worktree=use_git_worktree,
             )
         )
 
@@ -148,6 +150,7 @@ def task_run_command(
     name: str,
     cwd: Path | None = None,
     *,
+    no_worktree: bool = False,
     session_id: str | None = None,
     execute_task_fn: Callable[[], None] | None = None,
     rich_output: RichOutput | None = None,
@@ -157,6 +160,7 @@ def task_run_command(
     Args:
         name: Name of the task to run.
         cwd: Optional working directory.
+        no_worktree: When True, run execution in-place without creating a Git worktree.
         session_id: Optional fixed session ID.
         execute_task_fn: Optional custom execution hook (for testing/simulation).
         rich_output: Optional RichOutput presenter.
@@ -171,6 +175,22 @@ def task_run_command(
         error_msg = f"Task blueprint '{name}' not found."
         output.error_panel("Task Run Failed", error_msg)
         return TaskRunCommandOutcome(run_record=None, errors=[error_msg])
+
+    catalog_dir = get_catalog_dir(cwd)
+    file_path = catalog_dir / item.path
+
+    task_use_git_wt = True
+    if file_path.exists():
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            yaml_data = yaml.safe_load(content)
+            if isinstance(yaml_data, dict) and "use_git_worktree" in yaml_data:
+                task_use_git_wt = bool(yaml_data.get("use_git_worktree", True))
+        except Exception:
+            pass
+
+    effective_use_git_worktree = False if no_worktree else task_use_git_wt
+    _ = effective_use_git_worktree  # explicit evaluation
 
     sid = session_id or f"task_{uuid.uuid4().hex[:8]}"
     warnings: list[str] = []

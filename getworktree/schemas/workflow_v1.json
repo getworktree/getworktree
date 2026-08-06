@@ -127,7 +127,8 @@
       "required": ["auto_clean", "keep_on_failure"],
       "properties": {
         "auto_clean": { "type": "boolean" },
-        "keep_on_failure": { "type": "boolean" }
+        "keep_on_failure": { "type": "boolean" },
+        "use_git_worktree": { "type": "boolean", "default": true }
       }
     },
     "approval": {

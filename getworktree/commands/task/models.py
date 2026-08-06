@@ -17,6 +17,7 @@ class TaskBlueprintItem(BaseModel):
     summary: str
     sha: str
     path: str
+    use_git_worktree: bool = True
 
 
 class TaskListCommandOutcome(BaseModel):

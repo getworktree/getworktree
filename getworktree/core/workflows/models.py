@@ -78,6 +78,7 @@ class WorkflowSandbox(BaseModel):
 
     auto_clean: bool
     keep_on_failure: bool
+    use_git_worktree: bool = Field(default=True)
 
 
 class WorkflowApproval(BaseModel):

@@ -182,6 +182,7 @@ def workflow_run_command(
     approve_each: bool | None = None,
     wip: bool = False,
     dump_prompt: bool = False,
+    no_worktree: bool = False,
     cwd: Path | None = None,
     run_workflow_fn: Callable[..., WorkflowRunResult] | None = None,
 ) -> None:
@@ -194,6 +195,7 @@ def workflow_run_command(
         approve_each: When set, override workflow approval.require_before_apply.
         wip: When True, overlay uncommitted working-tree changes into sandbox.
         dump_prompt: When True, dump provider-specific agent input to ``/tmp``.
+        no_worktree: When True, run execution in-place without creating a Git worktree.
         cwd: Repository root.
         run_workflow_fn: Injectable controller (tests); defaults to ``run_workflow_iteration``.
     """
@@ -295,6 +297,7 @@ def workflow_run_command(
             detect_repeat_failures=config.workflow.detect_repeat_failures,
             include_wip=wip,
             prompt_dump_dir=prompt_dump_dir,
+            use_git_worktree=False if no_worktree else None,
         )
     except KeyboardInterrupt:
         abort_event.set()
