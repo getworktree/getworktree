@@ -189,14 +189,20 @@ def apply_wip_to_sandbox(*, source_root: Path, sandbox_path: Path) -> list[str]:
 class GitSandboxManager:
     """Manages creation, cleanup, and pruning of background Git worktrees."""
 
-    def __init__(self, cwd: Path | None = None) -> None:
+    def __init__(
+        self,
+        cwd: Path | None = None,
+        sandboxes_db: SandboxesRepository | None = None,
+    ) -> None:
         """Bind to an absolute repository root.
 
         Args:
             cwd: Repository root. Defaults to the process current directory.
+            sandboxes_db: Optional SandboxesRepository instance.
         """
         self.cwd = (cwd or Path.cwd()).expanduser().resolve()
         self.sandbox_base_dir = self.cwd / ".worktree" / "sandboxes"
+        self.sandboxes_db = sandboxes_db or SandboxesRepository(self.cwd)
         self._config: WorktreeConfig | None = None
 
     @property
@@ -462,7 +468,7 @@ class GitSandboxManager:
     def _persist_sandbox_session(self, session: SandboxSession) -> list[str]:
         """Insert *session* into the local DB; return any warning messages."""
         try:
-            SandboxesRepository(self.cwd).insert(
+            self.sandboxes_db.insert(
                 id=session.session_id,
                 name=session.name,
                 branch_name=session.target_branch,
@@ -669,7 +675,7 @@ class GitSandboxManager:
                 shutil.rmtree(session.sandbox_path, ignore_errors=True)
 
         try:
-            SandboxesRepository(self.cwd).update_status(
+            self.sandboxes_db.update_status(
                 session.session_id,
                 SandboxStatus.CLEANED,
             )

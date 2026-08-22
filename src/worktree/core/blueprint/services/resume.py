@@ -31,9 +31,11 @@ class BlueprintResumeService:
     output: RichOutput = field(default_factory=RichOutput)
 
     root: Path = field(init=False)
+    db: RunsRepository = field(init=False)
 
     def __post_init__(self) -> None:
         self.root = (self.cwd or Path.cwd()).resolve()
+        self.db = RunsRepository(self.root)
 
     def execute(self) -> BlueprintRunCommandOutcome:
         """Find session if omitted, classify and resume via Engine."""
@@ -62,7 +64,7 @@ class BlueprintResumeService:
 
     def _resolve_target_session(self) -> tuple[str, BlueprintKind | None, str | None]:
         if not self.session_id:
-            record = RunsRepository(self.root).get_latest_paused()
+            record = self.db.get_latest_paused()
             if record is None:
                 return "", None, "No paused session found to resume."
             self.output.info(f"Resuming latest paused session '{record.session_id}' ({record.blueprint_name})...")
@@ -88,7 +90,7 @@ class BlueprintResumeService:
 
     def _load_record(self, session_id: str) -> RunRecord | None:
         try:
-            return RunsRepository(self.root).get(session_id)
+            return self.db.get(session_id)
         except Exception:
             return None
 

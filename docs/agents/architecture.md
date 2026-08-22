@@ -314,7 +314,7 @@ document every column here; read models in `core/db/models.py`.
 
 **Construct one repository/facade per command invocation, not one per call.**
 `BaseRepository.session()` lazily runs `init_db()` (a full Alembic upgrade
-check plus legacy-migration probing) the first time a given instance is used.
+check) the first time a given instance is used.
 Constructing `SomeRepository(cwd)` fresh at every call site defeats that
 lazy-init entirely — every `.list()`/`.get()`/`.upsert()`/`.delete()` reruns
 the migration check, and a loop that constructs a new repository per

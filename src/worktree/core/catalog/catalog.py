@@ -31,8 +31,9 @@ class Catalog:
     )
     _STEP_ONLY: ClassVar[frozenset[CatalogItemType]] = frozenset({CatalogItemType.STEP})
 
-    def __init__(self, cwd: Path | None = None) -> None:
+    def __init__(self, cwd: Path | None = None, repo: CatalogRepository | None = None) -> None:
         self.cwd = (cwd or Path.cwd()).resolve()
+        self.db = repo or CatalogRepository(self.cwd)
 
     def resolve(self, name: str) -> CatalogResolveResult:
         """Load a task or workflow YAML by SHA or catalog name."""
@@ -44,10 +45,10 @@ class Catalog:
 
     def list(self, kind: CatalogItemType | str | None = None) -> list[CatalogRecord]:
         """Return indexed catalog records, optionally filtered by item type."""
-        scan_and_index_catalog(self.cwd)
+        scan_and_index_catalog(self.cwd, repo=self.db)
         if kind is None:
-            return CatalogRepository(self.cwd).list()
-        return CatalogRepository(self.cwd).list(item_type=self._coerce_item_type(kind))
+            return self.db.list()
+        return self.db.list(item_type=self._coerce_item_type(kind))
 
     def save(
         self,
@@ -69,7 +70,7 @@ class Catalog:
             atomic_write_text(target_path, text)
         except OSError as exc:
             raise CatalogWriteError(f"Failed to write catalog blueprint '{target_path}': {exc}") from exc
-        scan_and_index_catalog(self.cwd)
+        scan_and_index_catalog(self.cwd, repo=self.db)
         record = self._record_for_rel_path(rel_path)
         if record is None:
             raise CatalogWriteError(f"Failed to reindex catalog blueprint '{rel_path.as_posix()}'.")
@@ -88,7 +89,7 @@ class Catalog:
 
     def _resolve(self, name: str, allowed_types: frozenset[CatalogItemType]) -> CatalogResolveResult:
         """Reindex, find typed matches, and load the winning YAML object."""
-        scan_and_index_catalog(self.cwd)
+        scan_and_index_catalog(self.cwd, repo=self.db)
         matches = self._find_typed_matches(name, allowed_types)
         if not matches:
             return CatalogResolveResult(
@@ -139,15 +140,14 @@ class Catalog:
 
     def _find_typed_matches(self, name: str, allowed_types: frozenset[CatalogItemType]) -> list[CatalogRecord]:
         """Return SHA or name matches restricted to ``allowed_types``, path-ascending."""
-        db = CatalogRepository(self.cwd)
-        by_sha = db.get_by_sha(name)
+        by_sha = self.db.get_by_sha(name)
         if by_sha is not None:
             if by_sha.item_type in allowed_types:
                 return [by_sha]
             return []
         matches: list[CatalogRecord] = []
         for item_type in allowed_types:
-            matches.extend(db.list_by_name(name, item_type=item_type))
+            matches.extend(self.db.list_by_name(name, item_type=item_type))
         return sorted(matches, key=lambda record: record.path.as_posix())
 
     @staticmethod
@@ -170,7 +170,7 @@ class Catalog:
     def _record_for_rel_path(self, rel_path: Path) -> CatalogRecord | None:
         """Return the indexed record whose path equals ``rel_path``."""
         expected = rel_path.as_posix()
-        for record in CatalogRepository(self.cwd).list():
+        for record in self.db.list():
             if record.path.as_posix() == expected:
                 return record
         return None

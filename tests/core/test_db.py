@@ -78,6 +78,12 @@ class TestBaseRepository:
             assert session is not None
         assert repo.db_path.is_file()
 
+    def test_custom_db_engine(self, fs: FileSystem) -> None:
+        custom_engine = BaseRepository(cwd=fs.base_path, db_rel_path=DB_REL).db_engine
+        repo = BaseRepository(cwd=fs.base_path, db_engine=custom_engine)
+        assert repo.db_engine is custom_engine
+        assert repo.engine is custom_engine
+
 
 class TestSandboxesRepository:
     """Tests for SandboxesRepository CRUD methods."""
@@ -342,6 +348,12 @@ class TestWorktreeDbFacade:
         db = WorktreeDb(cwd=fs.base_path, db_rel_path=DB_REL)
         db.init_db()
 
+        assert db.sandboxes.db_engine is db.db_engine
+        assert db.runs.db_engine is db.db_engine
+        assert db.catalog.db_engine is db.db_engine
+        assert db.costs.db_engine is db.db_engine
+        assert db.engine is db.db_engine
+
         sb = db.sandboxes.insert(
             id="sb_facade",
             branch_name="feat/facade",
@@ -379,3 +391,9 @@ class TestWorktreeDbFacade:
         assert cost_id is not None
         totals = db.costs.get_session_total_cost("run_facade")
         assert totals["total_tokens"] == 30
+
+    def test_facade_custom_db_engine(self, fs: FileSystem) -> None:
+        db1 = WorktreeDb(cwd=fs.base_path, db_rel_path=DB_REL)
+        db2 = WorktreeDb(cwd=fs.base_path, db_engine=db1.db_engine)
+        assert db2.db_engine is db1.db_engine
+        assert db2.sandboxes.db_engine is db1.db_engine

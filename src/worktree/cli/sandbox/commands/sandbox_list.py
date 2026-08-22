@@ -22,9 +22,8 @@ from ..renderers import (
 )
 
 
-def _reconcile_stale_active_sandboxes(*, cwd: Path) -> None:
+def _reconcile_stale_active_sandboxes(*, db: SandboxesRepository) -> None:
     """Mark active rows whose sandbox directory is gone as cleaned."""
-    db = SandboxesRepository(cwd)
     for row in db.list():
         if row.status is not SandboxStatus.ACTIVE:
             continue
@@ -37,6 +36,7 @@ def collect_sandbox_list(
     status: str | None = None,
     *,
     cwd: Path | None = None,
+    db: SandboxesRepository | None = None,
 ) -> SandboxListResult:
     """Load config, reconcile stale active rows, and return list data.
 
@@ -44,6 +44,7 @@ def collect_sandbox_list(
         status: Optional status filter (``active``, ``merged``, ``cleaned``,
             ``conflict``). Reconciliation always runs on the full row set first.
         cwd: Repository root. Defaults to process CWD.
+        db: Optional SandboxesRepository instance.
 
     Returns:
         Structured list result. Does not print or exit.
@@ -56,13 +57,14 @@ def collect_sandbox_list(
             errors=list(load.errors),
         )
 
-    _reconcile_stale_active_sandboxes(cwd=root)
+    sandboxes_db = db or SandboxesRepository(root)
+    _reconcile_stale_active_sandboxes(db=sandboxes_db)
 
     status_filter: SandboxStatus | None = None
     if status is not None:
         status_filter = SandboxStatus(status)
 
-    rows = SandboxesRepository(root).list(status=status_filter)
+    rows = sandboxes_db.list(status=status_filter)
     return SandboxListResult(status=SandboxListStatus.OK, sandboxes=rows)
 
 

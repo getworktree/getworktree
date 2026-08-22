@@ -24,13 +24,14 @@ class BaseRepository:
         db_rel_path: str = DEFAULT_DB_REL_PATH,
         db_path: Path | None = None,
         auto_init: bool = True,
+        db_engine: Engine | None = None,
     ) -> None:
         self.cwd = cwd
         self.db_rel_path = db_rel_path
         self._db_path = db_path
         self._auto_init = auto_init
         self._initialized = False
-        self._engine: Engine | None = None
+        self._db_engine: Engine | None = db_engine
 
     @property
     def db_path(self) -> Path:
@@ -40,11 +41,16 @@ class BaseRepository:
         return self._db_path
 
     @property
-    def engine(self) -> Engine:
+    def db_engine(self) -> Engine:
         """SQLAlchemy / SQLModel Engine bound to db_path."""
-        if self._engine is None:
-            self._engine = get_engine(self.db_path)
-        return self._engine
+        if self._db_engine is None:
+            self._db_engine = get_engine(self.db_path)
+        return self._db_engine
+
+    @property
+    def engine(self) -> Engine:
+        """Alias to db_engine for compatibility."""
+        return self.db_engine
 
     def init_db(self) -> Path:
         """Run database migrations and mark initialized."""
@@ -54,8 +60,8 @@ class BaseRepository:
 
     @contextmanager
     def session(self) -> Generator[Session]:
-        """Context manager yielding a SQLModel Session bound to the engine, automatically initializing if needed."""
+        """Context manager yielding a SQLModel Session bound to the database engine, automatically initializing if needed."""
         if self._auto_init and not self._initialized:
             self.init_db()
-        with Session(self.engine) as session:
+        with Session(self.db_engine) as session:
             yield session

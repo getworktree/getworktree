@@ -62,7 +62,7 @@ def compute_catalog_sha(item_type: CatalogItemType | str, content: str) -> tuple
 
 
 def _index_catalog_entry(
-    cwd: Path | None,
+    repo: CatalogRepository,
     item_type: CatalogItemType,
     catalog_dir: Path,
     file_entry: YamlFile,
@@ -75,7 +75,7 @@ def _index_catalog_entry(
     rel_path = file_entry.path.relative_to(catalog_dir)
 
     try:
-        record = CatalogRepository(cwd).upsert(
+        record = repo.upsert(
             sha=sha,
             item_type=item_type,
             name=file_entry.name,
@@ -88,13 +88,13 @@ def _index_catalog_entry(
 
 
 def _index_scanned_entry(
-    cwd: Path | None,
+    repo: CatalogRepository,
     item_type: CatalogItemType,
     catalog_dir: Path,
     file_entry: YamlFile,
 ) -> tuple[CatalogRecord | None, str | None]:
     """Index one catalog YAML entry and normalize the optional error payload."""
-    record, error = _index_catalog_entry(cwd, item_type, catalog_dir, file_entry)
+    record, error = _index_catalog_entry(repo, item_type, catalog_dir, file_entry)
     if error is not None:
         return None, error
     return record, None
@@ -117,7 +117,7 @@ def _append_scan_result(
 
 
 def _scan_catalog_subdirectories(
-    *, cwd: Path | None = None, catalog_dir: Path, subdirs: list[tuple[CatalogItemType, Path]]
+    *, repo: CatalogRepository, catalog_dir: Path, subdirs: list[tuple[CatalogItemType, Path]]
 ) -> CatalogSubdirectoryScanResult:
     result = CatalogSubdirectoryScanResult(scanned_records=[], errors=[], scanned_shas=set())
 
@@ -125,32 +125,36 @@ def _scan_catalog_subdirectories(
         if not sub_dir.exists():
             continue
         for file_entry in scan_yaml_directory(sub_dir):
-            record, error = _index_scanned_entry(cwd, item_type, catalog_dir, file_entry)
+            record, error = _index_scanned_entry(repo, item_type, catalog_dir, file_entry)
             _append_scan_result(result, record=record, error=error)
 
     return result
 
 
-def scan_and_index_catalog(cwd: Path | None = None) -> CatalogScanResult:
+def scan_and_index_catalog(
+    cwd: Path | None = None,
+    repo: CatalogRepository | None = None,
+) -> CatalogScanResult:
     """Scan `.worktree/catalog/` subdirectories, compute SHA checksums, and sync SQLite database."""
     catalog_dir = ensure_catalog_dirs(cwd)
+    catalog_repo = repo or CatalogRepository(cwd)
 
     subdirs: list[tuple[CatalogItemType, Path]] = [
         (CatalogItemType.WORKFLOW, catalog_dir / "workflows"),
         (CatalogItemType.TASK, catalog_dir / "tasks"),
         (CatalogItemType.STEP, catalog_dir / "steps"),
     ]
-    scan_result = _scan_catalog_subdirectories(cwd=cwd, catalog_dir=catalog_dir, subdirs=subdirs)
+    scan_result = _scan_catalog_subdirectories(repo=catalog_repo, catalog_dir=catalog_dir, subdirs=subdirs)
     errors = scan_result.errors
 
     # Remove stale DB records for files no longer on disk
     try:
-        db_items = CatalogRepository(cwd).list()
+        db_items = catalog_repo.list()
         for record in db_items:
             if record.sha not in scan_result.scanned_shas:
                 disk_file = catalog_dir / record.path
                 if not disk_file.exists():
-                    CatalogRepository(cwd).delete(record.sha)
+                    catalog_repo.delete(record.sha)
     except Exception as exc:
         errors.append(f"Error purging stale catalog DB records: {exc}")
 
@@ -175,6 +179,7 @@ def create_catalog_item(
     item_type: CatalogItemType | str,
     name: str,
     cwd: Path | None = None,
+    repo: CatalogRepository | None = None,
 ) -> CatalogRecord:
     """Create a new catalog blueprint under `.worktree/catalog/<type>s/<name>.yml` and sync database."""
     try:
@@ -198,7 +203,8 @@ def create_catalog_item(
     sha, checksum = compute_catalog_sha(type_enum, content)
     rel_path = target_path.relative_to(catalog_dir)
 
-    return CatalogRepository(cwd).upsert(
+    catalog_repo = repo or CatalogRepository(cwd)
+    return catalog_repo.upsert(
         sha=sha,
         item_type=type_enum,
         name=stem,
@@ -211,6 +217,7 @@ def _find_catalog_matches(
     cwd: Path | None,
     sha_or_name: str,
     type_filter: CatalogItemType | str | None,
+    repo: CatalogRepository | None = None,
 ) -> list[CatalogRecord]:
     type_filter_string = (
         type_filter.value
@@ -218,12 +225,13 @@ def _find_catalog_matches(
         else (str(type_filter).lower() if type_filter is not None else None)
     )
 
-    item_by_sha = CatalogRepository(cwd).get_by_sha(sha_or_name)
+    catalog_repo = repo or CatalogRepository(cwd)
+    item_by_sha = catalog_repo.get_by_sha(sha_or_name)
     if item_by_sha is not None:
         if type_filter_string is None or item_by_sha.item_type.value == type_filter_string:
             return [item_by_sha]
         return []
-    return CatalogRepository(cwd).list_by_name(sha_or_name, item_type=type_filter)
+    return catalog_repo.list_by_name(sha_or_name, item_type=type_filter)
 
 
 def _read_and_parse_yaml(file_path: Path, rel_path: Path) -> YamlParseOutcome:
@@ -286,10 +294,12 @@ def get_catalog_item[T](
     *,
     definition_cls: type[T] | None = None,
     cwd: Path | None = None,
+    repo: CatalogRepository | None = None,
 ) -> DefinitionResolutionResult[CatalogRecord]:
     """Retrieve catalog blueprint record by SHA or name, optionally validating its content into ``definition_cls``."""
-    scan_and_index_catalog(cwd)
-    matches = _find_catalog_matches(cwd, sha_or_name, type_filter)
+    catalog_repo = repo or CatalogRepository(cwd)
+    scan_and_index_catalog(cwd, repo=catalog_repo)
+    matches = _find_catalog_matches(cwd, sha_or_name, type_filter, repo=catalog_repo)
 
     if not matches:
         return DefinitionResolutionResult(
@@ -332,9 +342,11 @@ def get_catalog_item[T](
 def delete_catalog_item_by_sha_or_name(
     sha_or_name: str,
     cwd: Path | None = None,
+    repo: CatalogRepository | None = None,
 ) -> CatalogRecord | None:
     """Delete a catalog blueprint file and its database record."""
-    result = get_catalog_item(sha_or_name, cwd=cwd)
+    catalog_repo = repo or CatalogRepository(cwd)
+    result = get_catalog_item(sha_or_name, cwd=cwd, repo=catalog_repo)
     item = result.resolved
     if item is None:
         return None
@@ -343,7 +355,7 @@ def delete_catalog_item_by_sha_or_name(
     file_path = catalog_dir / item.path
     delete_file(file_path)
 
-    CatalogRepository(cwd).delete(item.sha)
+    catalog_repo.delete(item.sha)
     return item
 
 
